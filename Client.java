@@ -123,7 +123,7 @@ public class Client {
         }
     }
 
-    public static void readFile(String filename) {
+    public static void readFile(String filename, int offset) {
         ArrayList<String> dest = new ArrayList<>();
         File targetfile = new File(myHostName, filename);
         try (
@@ -132,10 +132,10 @@ public class Client {
             BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()))
 		) {
             
-            out.println("request:read:" + filename);
+            out.println("request:read:" + filename + ":" + offset);
             String[] parse = in.readLine().split(",");
             //  if there is one or more file parts are unavalibale
-            if (parse.length == 1 && parse[0].equals(FNA)) {
+            if (parse[0].equals(FNA)) {
                 System.out.println(FNA);
                 return;
             }
@@ -148,49 +148,71 @@ public class Client {
             System.err.println("Couldn't get I/O for the connection to file server.");
         }
         
-        ArrayList<File> partList = new ArrayList<>();
-        
-        byte[] filePartBody = new byte[sizeOfFiles];
-        int bytesAmount = 0;
-        for (int i = 0; i < dest.size(); i++) {
-            File part = new File(myHostName, String.format("%s.%03d", filename, i));
+        if (offset == 0) {  // if no offset is specified, read all chunks and connect them as a whole file
+            ArrayList<File> partList = new ArrayList<>();        
+            byte[] filePartBody = new byte[sizeOfFiles];
+            int bytesAmount = 0;
+            for (int i = 0; i < dest.size(); i++) {
+                File part = new File(myHostName, String.format("%s.%03d", filename, i));
+                try (
+                    Socket socket = new Socket(dest.get(i).split(":")[0], Integer.parseInt(dest.get(i).split(":")[1]));
+                    OutputStream outs = socket.getOutputStream();
+                    InputStream ins = socket.getInputStream()  
+                ) {
+                    String outHeader = "read" + ":" + part.getName();
+                    byte[] header = new byte[sizeOfheader];
+                    header = Base64.getEncoder().encode((String.format("%-" + Integer.toString(sizeOfheader) + "s", outHeader)).getBytes());   // pad the outgoing message to 64 bytes and encode it to binary format
+                    outs.write(header);
+                    Files.copy​(ins, part.toPath());
+                    // try (
+                    //     FileOutputStream fos = new FileOutputStream(part)
+                    // ) {
+                    //     while ((bytesAmount = ins.read(filePartBody)) > 0) {
+                    //         System.out.println(bytesAmount);
+                    //         fos.write(filePartBody, 0, bytesAmount);
+                    //     }
+                    // } catch (IOException e) {
+                    //     System.err.println("Write is not done.");
+                    // }
+
+                } catch (IOException e) {
+                    System.err.print("");
+                }
+                partList.add(part);
+            }   
+            
             try (
-                Socket socket = new Socket(dest.get(i).split(":")[0], Integer.parseInt(dest.get(i).split(":")[1]));
-                OutputStream outs = socket.getOutputStream();
-                InputStream ins = socket.getInputStream()  
+                FileOutputStream fos = new FileOutputStream(targetfile)
+            ) {
+                for (File f : partList) {
+                    Files.copy(f.toPath(), fos);
+                    Files.delete(f.toPath());
+                }
+                System.out.println("File is ready to be read at " + targetfile.getAbsolutePath());
+            } catch (IOException e) {
+                System.err.println("Get file failed, please try again.");
+            }
+        } else {
+            File part = new File(myHostName, String.format("%s.%03d", filename, i));
+            byte[] filePartBody = new byte[sizeOfFiles];
+            int bytesAmount = 0;
+            int startPoint = dest.get(0).split(":")[2];
+            try (
+                    Socket socket = new Socket(dest.get(0).split(":")[0], Integer.parseInt(dest.get(0).split(":")[1]));
+                    OutputStream outs = socket.getOutputStream();
+                    InputStream ins = socket.getInputStream()  
             ) {
                 String outHeader = "read" + ":" + part.getName();
                 byte[] header = new byte[sizeOfheader];
                 header = Base64.getEncoder().encode((String.format("%-" + Integer.toString(sizeOfheader) + "s", outHeader)).getBytes());   // pad the outgoing message to 64 bytes and encode it to binary format
                 outs.write(header);
-                Files.copy​(ins, part.toPath());
-                // try (
-                //     FileOutputStream fos = new FileOutputStream(part)
-                // ) {
-                //     while ((bytesAmount = ins.read(filePartBody)) > 0) {
-                //         System.out.println(bytesAmount);
-                //         fos.write(filePartBody, 0, bytesAmount);
-                //     }
-                // } catch (IOException e) {
-                //     System.err.println("Write is not done.");
-                // }
-
+                if( (bytesAmount = ins.read​(filePartBody, startPoint, 1024)) > 0 ) {  // read 1KB from the offset
+                    System.out.println("1KB file content starting from the offset:");
+                    System.out.println(Base64.getDecoder().decode(filePartBody));
+                }
             } catch (IOException e) {
-                System.err.print("");
-            }
-            partList.add(part);
-        }   
-        
-        try (
-            FileOutputStream fos = new FileOutputStream(targetfile)
-        ) {
-            for (File f : partList) {
-                Files.copy(f.toPath(), fos);
-                Files.delete(f.toPath());
-            }
-            System.out.println("File is ready to be read at " + targetfile.getAbsolutePath());
-        } catch (IOException e) {
-            System.err.println("Get file failed, please try again.");
+                    System.err.print("Get chunk failed, please try again.");
+                }
         }
     }
 

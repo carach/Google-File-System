@@ -1,5 +1,5 @@
 /*
-request format: request:read:filename
+request format: request:read:filename:offset
                 request:append:filename:size
                 request:transfer:filename:size
                 request:create:filename
@@ -51,6 +51,7 @@ public class MServer {
     }
     private static final String RNR = "Request not recognized.";
     private static final String NSF = "No such file.";
+    private static final String NSC = "No such chunk.";
     private static final String FNA = "File currently unavailable.";
 
     private static void processMsg(Socket sck) {
@@ -148,20 +149,38 @@ public class MServer {
                     return NSF;
                 } else {
                     StringBuilder loc = new StringBuilder();
-                    for (Chunklet chk: fileLocation.get(filename)) {
-                        loc.append(chk.location);
-                        for (FileServer fs: serverList) {
-                            if (fs.hostname.equals(chk.location)) {
-                                if (!fs.alive) {   // when the file system is down
-                                    return FNA;
-                                } else {
-                                    loc.append(":" + fs.port + ",");
-                                    break;
+                    if ( message[3] == 0) {  // if there is no specific offset, read the whole file
+                        for (Chunklet chk: fileLocation.get(filename)) {
+                            for (FileServer fs: serverList) {
+                                if (fs.hostname.equals(chk.location)) {
+                                    if (!fs.alive) {   // when the file system is down
+                                        return FNA;
+                                    } else {
+                                        loc.append(chk.location + ":" + fs.port + ",");
+                                        break;
+                                    }
                                 }
                             }
                         }
-                    }
-                    return loc.toString();
+                        return loc.toString();
+                    } else {
+                        int offset = message[3];
+                        for (Chunklet chk: fileLocation.get(filename)) {
+                            if ( chk.size >= offset) {
+                                for (FileServer fs: serverList) {
+                                    if (fs.hostname.equals(chk.location)) {
+                                        if (!fs.alive) {   // when the file system is down
+                                            return FNA;
+                                        } else {
+                                            return chk.location + ":" + fs.port + ":" + offset;
+                                        }
+                                    }
+                                }
+                            } else {
+                                offset = offset - chk.size;
+                            }
+                        }
+                    return NSC; // offset exceeds max file size
                 }
             }
 // append response format: dc34.utdallas.edu:9034,8
@@ -183,7 +202,7 @@ public class MServer {
                         }
                     } else {    // find a new server to store as a new chunklet
                         do {
-                            int index = (int)Math.random() * serverList.size();
+                            int index = (int)(Math.random() * serverList.size());
                             fs = serverList.get(index);   
                         } while (!fs.alive);    
                         return fs.hostname + ":" + Integer.toString(fs.port) + "," + Integer.toString(fileLocation.get(filename).size());
@@ -205,7 +224,7 @@ public class MServer {
             case "create": {
                 FileServer fs;
                 do {
-                    int index = (int)Math.random() * serverList.size();
+                    int index = (int)(Math.random() * serverList.size());
                     fs = serverList.get(index);   
                 } while (!fs.alive);    
                 return fs.hostname + ":" + Integer.toString(fs.port);
