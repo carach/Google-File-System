@@ -148,8 +148,9 @@ public class MServer {
                 if (!fileLocation.containsKey(filename)) {
                     return NSF;
                 } else {
+                    int offset = Integer.parseInt(message[3]);
                     StringBuilder loc = new StringBuilder();
-                    if ( message[3] == 0) {  // if there is no specific offset, read the whole file
+                    if ( offset == -1) {  // if client specifies -1 which means reading the whole file
                         for (Chunklet chk: fileLocation.get(filename)) {
                             for (FileServer fs: serverList) {
                                 if (fs.hostname.equals(chk.location)) {
@@ -164,15 +165,15 @@ public class MServer {
                         }
                         return loc.toString();
                     } else {
-                        int offset = message[3];
-                        for (Chunklet chk: fileLocation.get(filename)) {
+                        for (int i = 0; i < fileLocation.get(filename).size(); i++) {
+                            Chunklet chk = fileLocation.get(filename).get(i);
                             if ( chk.size >= offset) {
                                 for (FileServer fs: serverList) {
                                     if (fs.hostname.equals(chk.location)) {
                                         if (!fs.alive) {   // when the file system is down
                                             return FNA;
                                         } else {
-                                            return chk.location + ":" + fs.port + ":" + offset;
+                                            return chk.location + ":" + fs.port + ":" + i + ":" + offset;
                                         }
                                     }
                                 }
@@ -181,6 +182,7 @@ public class MServer {
                             }
                         }
                     return NSC; // offset exceeds max file size
+                    }
                 }
             }
 // append response format: dc34.utdallas.edu:9034,8

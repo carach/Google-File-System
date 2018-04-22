@@ -26,6 +26,7 @@ public class Client {
 
     private static final String RNR = "Request not recognized.";
     private static final String NSF = "No such file.";
+    private static final String NSC = "No such chunk.";
     private static final String FNA = "File currently unavailable.";
 
     public static void createFile(String filename) {
@@ -139,6 +140,16 @@ public class Client {
                 System.out.println(FNA);
                 return;
             }
+            //  if there is no such a file on server
+            if (parse[0].equals(NSF)) {
+                System.out.println(NSF);
+                return;
+            }
+            //  if there is no such a chunk of the file
+            if (parse[0].equals(NSC)) {
+                System.out.println(NSC);
+                return;
+            }
             //System.out.println(parse.length);
             for(int i = 0; i < parse.length; i++) {
                 dest.add(parse[i]);
@@ -148,7 +159,7 @@ public class Client {
             System.err.println("Couldn't get I/O for the connection to file server.");
         }
         
-        if (offset == 0) {  // if no offset is specified, read all chunks and connect them as a whole file
+        if (offset == -1) {  // read all chunks and connect them as a whole file
             ArrayList<File> partList = new ArrayList<>();        
             byte[] filePartBody = new byte[sizeOfFiles];
             int bytesAmount = 0;
@@ -193,22 +204,27 @@ public class Client {
                 System.err.println("Get file failed, please try again.");
             }
         } else {
-            File part = new File(myHostName, String.format("%s.%03d", filename, i));
-            byte[] filePartBody = new byte[sizeOfFiles];
+            int partNo = Integer.parseInt(dest.get(0).split(":")[2]);
+            int startPoint = Integer.parseInt(dest.get(0).split(":")[3]);
+            File part = new File(myHostName, String.format("%s.%03d", filename, partNo));
+            char[] filePartBody = new char[sizeOfFiles];
+            byte[] header = new byte[sizeOfheader];
+            char[] content; 
             int bytesAmount = 0;
-            int startPoint = dest.get(0).split(":")[2];
             try (
                     Socket socket = new Socket(dest.get(0).split(":")[0], Integer.parseInt(dest.get(0).split(":")[1]));
                     OutputStream outs = socket.getOutputStream();
-                    InputStream ins = socket.getInputStream()  
+                    InputStream ins = socket.getInputStream();
+                    BufferedReader br = new BufferedReader(new InputStreamReader(ins))  
             ) {
                 String outHeader = "read" + ":" + part.getName();
-                byte[] header = new byte[sizeOfheader];
                 header = Base64.getEncoder().encode((String.format("%-" + Integer.toString(sizeOfheader) + "s", outHeader)).getBytes());   // pad the outgoing message to 64 bytes and encode it to binary format
                 outs.write(header);
-                if( (bytesAmount = ins.read​(filePartBody, startPoint, 1024)) > 0 ) {  // read 1KB from the offset
-                    System.out.println("1KB file content starting from the offset:");
-                    System.out.println(Base64.getDecoder().decode(filePartBody));
+                if( (bytesAmount = br.read​(filePartBody, 0, sizeOfFiles)) > 0 ) {  // read the whole chunk containing the offset
+                    content = Arrays.copyOfRange(filePartBody, startPoint, bytesAmount);
+                    System.out.println("File content starting from the offset:");                   
+                    System.out.println(new String(content));
+                    // System.out.println(Arrays.toString(filePartBody));
                 }
             } catch (IOException e) {
                     System.err.print("Get chunk failed, please try again.");
@@ -218,7 +234,7 @@ public class Client {
 
     public static void appendContent(String filename, String content) {
         if (content.length() > 1024 * 2) {  // if appended content exceeds the maximum size 2k
-            System.out.println("appended content exceeds the maximum size 2KB");
+            System.out.println("Content exceeds the maximum size 2KB");
             return;
         }
         String dest = "";
@@ -234,6 +250,11 @@ public class Client {
             //  if the last file part is unavalibale
             if (parse.length == 1 && parse[0].equals(FNA)) {
                 System.out.println(FNA);
+                return;
+            }
+            //  if there is no such a file on server
+            if (parse[0].equals(NSF)) {
+                System.out.println(NSF);
                 return;
             }
             dest = parse[0];
@@ -336,12 +357,17 @@ public class Client {
         
         while(true) {
             Scanner sc = new Scanner(System.in);
-            System.out.println("Please choose an operation：read $filename/append $filename/create $filename/tranfer $filename");
+            System.out.println("Please choose an operation：read $filename $offset(-1 retrieves the whole file)/append $filename/create $filename/transfer $filename");
             String command = sc.next();
             String file = sc.next();
             switch (command) {
                 case("read"): {
-                    readFile(file);
+                    int offset = sc.nextInt();
+                    if (offset < -1) {
+                        System.out.println("offset not recogonized.");
+                    } else {
+                        readFile(file, offset);
+                    }
                     break;
                 }
                 case("append"): {
