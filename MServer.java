@@ -23,6 +23,7 @@ import static java.lang.Math.toIntExact;
 
 public class MServer {
     private static final int portNumber = 9037;
+    private static final int sizeOfFiles = 8 * 1024;// 8 Kilobyte per chunk
     private static LinkedList<FileServer> serverList;
     private static HashMap<String, ArrayList<Chunklet>> fileLocation;
     public static class FileServer {
@@ -40,19 +41,22 @@ public class MServer {
     public static class Chunklet {
         String name;
         int size;
-        String location;
+        String[] location;  // each chunk has multiple replicas
         public Chunklet() {
+            this.location = new String[3];
         }
         public Chunklet(String n, int s, String l) {
             this.name = n;
             this.size = s;
-            this.location = l;  // hostname
+            this.location = new String[3];
+            this.location[0] = l;  // hostname
         }
     }
     private static final String RNR = "Request not recognized.";
     private static final String NSF = "No such file.";
     private static final String NSC = "No such chunk.";
     private static final String FNA = "File currently unavailable.";
+    private static final String SRI = "File server resource inadequate.";
 
     private static void processMsg(Socket sck) {
         try(
@@ -114,7 +118,7 @@ public class MServer {
                 break;
             }
         }
-        if (newfs) {    // add a brand new file system
+        if (newfs) {    // add a brand new file server
             System.out.println("File server " + hostname + " started.");
             serverList.add(new FileServer(hostname, Integer.parseInt(message[1])));
         }
@@ -128,11 +132,20 @@ public class MServer {
                 fileLocation.put(filename, new ArrayList<Chunklet>());
             }
             int chunkListSize = fileLocation.get(filename).size();
-            for (int k = 0; k <= Integer.parseInt(PartNo) - chunkListSize; k++) {   // expand the size of the chunk list so that new PartNo can be inserted in.
-                fileLocation.get(filename).add(new Chunklet());
+            if (Integer.parseInt(PartNo) >= chunkListSize) {
+                for (int k = chunkListSize; k <= Integer.parseInt(PartNo); k++) {   // expand the size of the chunk list when necessary so that new PartNo can be inserted in.
+                    fileLocation.get(filename).add(new Chunklet());
+                }
+                fileLocation.get(filename).set(Integer.parseInt(PartNo), new Chunklet(PartNo, size, hostname));
+            } else {
+                String[] loc = fileLocation.get(filename).get(Integer.parseInt(PartNo)).location;
+                for (String str: loc) {
+                    if (str == null) {
+                        str = hostname;
+                        break;
+                    }
+                }
             }
-            fileLocation.get(filename).set(Integer.parseInt(PartNo), new Chunklet(PartNo, size, hostname));
-            // }
         }
     }
 
@@ -143,13 +156,13 @@ public class MServer {
         if (message == null || message.length < 3)
             return RNR;
         String filename = message[2];
+        StringBuilder loc = new StringBuilder();
         switch(message[1]) {
             case "read": {
                 if (!fileLocation.containsKey(filename)) {
                     return NSF;
                 } else {
                     int offset = Integer.parseInt(message[3]);
-                    StringBuilder loc = new StringBuilder();
                     if ( offset == -1) {  // if client specifies -1 which means reading the whole file
                         for (Chunklet chk: fileLocation.get(filename)) {
                             for (FileServer fs: serverList) {
@@ -193,7 +206,7 @@ public class MServer {
                 } else {
                     int size = Integer.parseInt(message[3]);
                     Chunklet chk = fileLocation.get(filename).get(fileLocation.get(filename).size()-1); // find the last chunklet
-                    if (chk.size < 8 * 1024 - size) {   // there is enough space to append it, return just the location of this chunk
+                    if (chk.size < sizeOfFiles - size) {   // there is enough space to append it, return just the location of this chunk
                         for (FileServer fse: serverList) {
                             if (fse.hostname.equals(chk.location)) {
                                 if (fse.alive) {
@@ -212,9 +225,8 @@ public class MServer {
                 }
             }
             case "transfer": {
-                StringBuilder loc = new StringBuilder();
                 FileServer fs;
-                for (int i = 0; i <= Integer.parseInt(message[3]) / (8 * 1024); i++) {
+                for (int i = 0; i <= Integer.parseInt(message[3]) / sizeOfFiles; i++) {
                     do {
                         int index = (int)(Math.random() * serverList.size());
                         fs = serverList.get(index);   
@@ -225,11 +237,21 @@ public class MServer {
             }    
             case "create": {
                 FileServer fs;
-                do {
-                    int index = (int)(Math.random() * serverList.size());
-                    fs = serverList.get(index);   
-                } while (!fs.alive);    
-                return fs.hostname + ":" + Integer.toString(fs.port);
+                if (serverList.size() < 3) {
+                    return SRI;
+                }
+                int counter = 0;
+                while (counter < 3) {   // requires 3 or more active file servers or loop never ends.
+                    do {
+                        int index = (int)(Math.random() * serverList.size());
+                        fs = serverList.get(index);   
+                    } while (!fs.alive);
+                    if (loc.indexOf(fs.hostname) == -1) {   // A new server is selected    
+                        loc.append(fs.hostname + ":" + Integer.toString(fs.port) + ",");
+                        counter++;
+                    }
+                }
+                return loc.toString();
             }
         }
         return RNR;

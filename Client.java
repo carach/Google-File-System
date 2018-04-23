@@ -20,7 +20,7 @@ import java.util.Arrays;
 public class Client {
     private static final String Mserver = "dc37.utdallas.edu";
     private static final int MserverPort = 9037;
-    private static final int sizeOfFiles = 8 * 1024;// 8 Kilobyte
+    private static final int sizeOfFiles = 8 * 1024;// 8 Kilobyte per chunk
     private static final int sizeOfheader = 48;
     private static String myHostName;
 
@@ -28,9 +28,10 @@ public class Client {
     private static final String NSF = "No such file.";
     private static final String NSC = "No such chunk.";
     private static final String FNA = "File currently unavailable.";
+    private static final String SRI = "File server resource inadequate.";
 
     public static void createFile(String filename) {
-        String dest = "";
+        ArrayList<String> dest = new ArrayList<>();
         try (
             Socket socket = new Socket(Mserver, MserverPort);
             PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
@@ -38,13 +39,22 @@ public class Client {
             new InputStreamReader(socket.getInputStream()))
         ) {
             out.println("request:create" + ":" + filename);
-            dest = in.readLine();
+            String[] parse = in.readLine().split(",");
+            if (parse[0].equals(SRI)) {
+                System.out.println(SRI);
+                return;
+            }
+            for(int i = 0; i < parse.length; i++) {
+//                System.out.println(parse[i]);
+                dest.add(parse[i]);
+            }
         } catch (IOException e) {
             System.err.println("Couldn't get I/O for the connection to Meta Server.");
         }
-        if (!dest.isEmpty()) {
+        
+        for( String str: dest) {
             try (
-                Socket socket = new Socket(dest.split(":")[0], Integer.parseInt(dest.split(":")[1]) );
+                Socket socket = new Socket(str.split(":")[0], Integer.parseInt(str.split(":")[1]) );
                 OutputStream outs= socket.getOutputStream();
                 InputStream ins = socket.getInputStream()
             ) {
@@ -55,10 +65,8 @@ public class Client {
             } catch (IOException e) {
                 System.err.println("Couldn't get I/O for the connection to the file server.");
             }
-            System.out.println("New file created.");
-        } else {
-            System.out.println("File creation failed.");
         }
+        System.out.println("New file created.");
     }
 
     public static void transferFile(File f) {

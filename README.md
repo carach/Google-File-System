@@ -23,5 +23,5 @@ then input as the prompt requires.
 
 caution: 
 
-1.Application runs properly when there is one or more online file server.
+1.Application runs properly when there is 3 or more online file server.
 2.Client and server has to be different machines. No client and be a server at the same time and vice versa, since the setting of the working directory.
